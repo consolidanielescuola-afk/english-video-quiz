@@ -1,0 +1,23 @@
+# Render Blueprint - definisce il servizio backend come Infrastructure as Code.
+# Utile se in futuro colleghi un repository Git a Render e scegli "New Blueprint":
+# Render leggerà questo file e configurerà automaticamente il servizio.
+# Le API key vanno comunque inserite a mano nella dashboard di Render (sync: false
+# = "non salvarle in questo file", per non rischiare di committarle per errore).
+
+services:
+  - type: web
+    name: english-video-quiz-backend
+    runtime: docker
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false

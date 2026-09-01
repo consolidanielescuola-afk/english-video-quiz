@@ -17,8 +17,8 @@ Web app che genera schede didattiche di inglese interattive (video + esercizi) a
 └──────────────┘                                │
                                                  ▼
                                        ┌───────────────────┐
-                                       │  LLM (Anthropic    │
-                                       │  Claude API)        │
+                                       │  LLM (Google        │
+                                       │  Gemini API)         │
                                        │  → JSON esercizi    │
                                        └───────────────────┘
 ```
@@ -44,10 +44,10 @@ Libreria Python che recupera i sottotitoli (anche auto-generati) senza bisogno d
 - Se si vuole evitare la gestione di una API key, si può usare l'endpoint pubblico `oEmbed` (`https://www.youtube.com/oembed?url=...`) solo per verificare che il video esista e sia pubblico, ma **non fornisce la durata** — la durata quindi va comunque recuperata o dedotta dai timestamp dell'ultima riga della trascrizione (soluzione "povera" ma funzionante senza API key). Consiglio comunque la Data API v3 per affidabilità.
 - La verifica "lingua inglese" in pratica è più affidabile controllando la lingua della trascrizione recuperata (la maggior parte delle trascrizioni auto-generate riporta il codice lingua, es. `en`, `en-US`) piuttosto che fidarsi solo dei metadati del video, spesso mancanti.
 
-**Generazione esercizi: Anthropic Claude API (o OpenAI, intercambiabili)**
-- Si invia la trascrizione (troncata/pulita) + un prompt strutturato che richiede **esclusivamente JSON** conforme a uno schema fisso (vedi `backend/services/ai_generator.py`).
-- Claude e GPT supportano entrambi output JSON vincolato (Claude: prompt engineering + validazione post-hoc con Pydantic; OpenAI: `response_format={"type": "json_schema"}`). Il codice d'esempio usa l'SDK Anthropic ma la funzione è isolata in un unico modulo così è facile passare a OpenAI cambiando poche righe.
-- Motivo per non usare un modello locale/open-source: la qualità nella modulazione del livello CEFR (lessico, complessità sintattica) e nella generazione di distrattori plausibili per le multiple choice richiede modelli di fascia alta.
+**Generazione esercizi: Google Gemini API (piano gratuito)**
+- Si invia la trascrizione (troncata/pulita) + un prompt strutturato che richiede **esclusivamente JSON** conforme a uno schema fisso (vedi `backend/services/ai_generator.py`), rinforzato anche a livello di API con `response_mime_type="application/json"`.
+- Scelto al posto di Claude/OpenAI perché la Gemini API mette a disposizione modelli "Flash" gratuiti (nessuna carta di credito richiesta), sufficienti per generare esercizi da un video di massimo 10 minuti. Il codice isola la chiamata all'LLM in un'unica funzione (`_call_llm`), quindi passare a Claude o OpenAI in futuro (se serve più qualità o quota) richiede di toccare solo quella funzione.
+- Compromesso da conoscere: i modelli gratuiti "Flash" sono meno raffinati di un modello di punta nel calibrare con precisione i livelli CEFR più alti (C1) o nel generare distrattori molto sottili per le multiple choice — per un uso didattico standard restano comunque adeguati.
 
 **Generazione PDF: Playwright (server-side) come soluzione principale**
 - La scheda è già una pagina HTML/CSS ben impaginata: la soluzione più robusta è **renderizzarla in un browser headless (Playwright) e stamparla in PDF** (`page.pdf()`), perché rispetta perfettamente CSS, `@media print`, interruzioni di pagina (`page-break-*`) e permette di generare due varianti (studente senza soluzioni / insegnante con soluzioni in pagina separata) semplicemente passando un parametro che aggiunge/rimuove una classe CSS prima dello screenshot.
@@ -62,7 +62,7 @@ Libreria Python che recupera i sottotitoli (anche auto-generati) senza bisogno d
 | Backend | FastAPI (Python 3.11+) | Async, validazione Pydantic, OpenAPI automatico |
 | Trascrizione | `youtube-transcript-api` | Nessuna API key, supporta sottotitoli auto-generati |
 | Metadati video (durata/lingua/esistenza) | YouTube Data API v3 | Unica fonte affidabile per durata e stato del video |
-| Generazione esercizi | Anthropic Claude API (`claude-sonnet-...`) | Qualità nel controllo del livello CEFR e nei distrattori |
+| Generazione esercizi | Google Gemini API (`gemini-2.5-flash`, gratuito) | Nessun costo per uso didattico non massivo, output JSON vincolato |
 | Correzione | JS lato client | Istantanea, nessuna latenza di rete |
 | PDF | Playwright (server) + html2pdf.js (fallback client) | Fedeltà di stampa massima; fallback semplice |
 | Hosting suggerito | Frontend: Netlify/Vercel — Backend: Render/Fly.io/Railway | Deploy gratuito/economico, HTTPS incluso |
@@ -82,7 +82,7 @@ english-video-quiz/
 └── backend/
     ├── main.py              # entrypoint FastAPI, definizione endpoint
     ├── requirements.txt
-    ├── .env.example         # YOUTUBE_API_KEY, ANTHROPIC_API_KEY
+    ├── .env.example         # YOUTUBE_API_KEY, GEMINI_API_KEY
     ├── models/
     │   └── schemas.py       # Pydantic: request/response, Exercise, GenerateRequest...
     └── services/

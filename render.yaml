@@ -15,9 +15,9 @@ services:
     envVars:
       - key: YOUTUBE_API_KEY
         sync: false
-      - key: ANTHROPIC_API_KEY
+      - key: GEMINI_API_KEY
         sync: false
-      - key: ANTHROPIC_MODEL
+      - key: GEMINI_MODEL
         sync: false
       - key: FRONTEND_ORIGIN
         sync: false

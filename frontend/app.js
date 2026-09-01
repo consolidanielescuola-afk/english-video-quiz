@@ -3,7 +3,7 @@
 // Vanilla JS, nessuna dipendenza esterna a parte Tailwind (CDN, solo stile).
 // ============================================================================
 
-const API_BASE_URL = "http://localhost:8000"; // <-- puntare al backend in produzione
+const API_BASE_URL = "https://english-video-quiz-backend.onrender.com";
 
 // ---- Stato applicazione ---------------------------------------------------
 let currentWorksheet = null; // ultima scheda generata (JSON dal backend)

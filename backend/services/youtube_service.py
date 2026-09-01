@@ -98,9 +98,14 @@ async def _fetch_video_metadata(video_id: str) -> dict:
 
 
 def _fetch_transcript_sync(video_id: str) -> tuple[str, str]:
-    """Chiamata sincrona (la libreria non è async): va eseguita in threadpool dal chiamante."""
+    """Chiamata sincrona (la libreria non è async): va eseguita in threadpool dal chiamante.
+
+    NB: dalla v1.x di youtube-transcript-api l'API è cambiata da classmethod
+    (YouTubeTranscriptApi.list_transcripts(...)) a istanza (YouTubeTranscriptApi().list(...)).
+    """
+    ytt_api = YouTubeTranscriptApi()
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript_list = ytt_api.list(video_id)
     except TranscriptsDisabled:
         raise HTTPException(status_code=422, detail="I sottotitoli sono disabilitati per questo video: impossibile generare gli esercizi.")
     except VideoUnavailable:
@@ -116,8 +121,8 @@ def _fetch_transcript_sync(video_id: str) -> tuple[str, str]:
         )
 
     language_code = transcript.language_code
-    segments = transcript.fetch()
-    full_text = " ".join(seg["text"] for seg in segments)
+    fetched = transcript.fetch()  # FetchedTranscript: iterabile di FetchedTranscriptSnippet(text, start, duration)
+    full_text = " ".join(snippet.text for snippet in fetched)
     return full_text, language_code
 
 

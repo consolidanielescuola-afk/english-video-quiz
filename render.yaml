@@ -21,3 +21,7 @@ services:
         sync: false
       - key: FRONTEND_ORIGIN
         sync: false
+      - key: WEBSHARE_PROXY_USERNAME
+        sync: false
+      - key: WEBSHARE_PROXY_PASSWORD
+        sync: false

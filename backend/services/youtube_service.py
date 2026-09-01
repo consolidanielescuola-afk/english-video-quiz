@@ -23,9 +23,31 @@ from youtube_transcript_api import (
     VideoUnavailable,
     YouTubeTranscriptApi,
 )
+from youtube_transcript_api._errors import IpBlocked, RequestBlocked
+from youtube_transcript_api.proxies import WebshareProxyConfig
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 MAX_DURATION_SECONDS = 10 * 60  # requisito di progetto: max 10 minuti
+
+# YouTube blocca le richieste che arrivano dagli IP dei provider cloud
+# (Render/AWS/GCP/Azure/...): senza un proxy, ytt_api.list()/.fetch() falliscono
+# con IpBlocked/RequestBlocked non appena l'app gira su un hosting "vero".
+# Webshare offre 10 proxy datacenter gratuiti (nessuna carta richiesta): se le
+# credenziali sono configurate le usiamo, altrimenti si prova senza proxy
+# (va benissimo in locale, dove l'IP di casa non è bloccato).
+WEBSHARE_PROXY_USERNAME = os.getenv("WEBSHARE_PROXY_USERNAME")
+WEBSHARE_PROXY_PASSWORD = os.getenv("WEBSHARE_PROXY_PASSWORD")
+
+
+def _build_ytt_api() -> YouTubeTranscriptApi:
+    if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
+        return YouTubeTranscriptApi(
+            proxy_config=WebshareProxyConfig(
+                proxy_username=WEBSHARE_PROXY_USERNAME,
+                proxy_password=WEBSHARE_PROXY_PASSWORD,
+            )
+        )
+    return YouTubeTranscriptApi()
 
 VIDEO_ID_PATTERNS = [
     r"(?:v=|\/videos\/|embed\/|youtu\.be\/|\/v\/|\/e\/|watch\?v=)([a-zA-Z0-9_-]{11})",
@@ -103,13 +125,22 @@ def _fetch_transcript_sync(video_id: str) -> tuple[str, str]:
     NB: dalla v1.x di youtube-transcript-api l'API è cambiata da classmethod
     (YouTubeTranscriptApi.list_transcripts(...)) a istanza (YouTubeTranscriptApi().list(...)).
     """
-    ytt_api = YouTubeTranscriptApi()
+    ytt_api = _build_ytt_api()
     try:
         transcript_list = ytt_api.list(video_id)
     except TranscriptsDisabled:
         raise HTTPException(status_code=422, detail="I sottotitoli sono disabilitati per questo video: impossibile generare gli esercizi.")
     except VideoUnavailable:
         raise HTTPException(status_code=404, detail="Video non disponibile.")
+    except (IpBlocked, RequestBlocked):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "YouTube ha temporaneamente bloccato le richieste dal server. "
+                "Riprova tra qualche minuto; se il problema persiste, contatta l'amministratore del sito "
+                "(potrebbe essere necessario configurare un proxy)."
+            ),
+        )
 
     # Preferisci una trascrizione in inglese (manuale o auto-generata); se non esiste, errore chiaro.
     try:
@@ -121,7 +152,17 @@ def _fetch_transcript_sync(video_id: str) -> tuple[str, str]:
         )
 
     language_code = transcript.language_code
-    fetched = transcript.fetch()  # FetchedTranscript: iterabile di FetchedTranscriptSnippet(text, start, duration)
+    try:
+        fetched = transcript.fetch()  # FetchedTranscript: iterabile di FetchedTranscriptSnippet(text, start, duration)
+    except (IpBlocked, RequestBlocked):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "YouTube ha temporaneamente bloccato le richieste dal server. "
+                "Riprova tra qualche minuto; se il problema persiste, contatta l'amministratore del sito "
+                "(potrebbe essere necessario configurare un proxy)."
+            ),
+        )
     full_text = " ".join(snippet.text for snippet in fetched)
     return full_text, language_code
 

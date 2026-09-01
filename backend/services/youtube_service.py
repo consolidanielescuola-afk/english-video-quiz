@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import httpx
+import requests.exceptions
 from fastapi import HTTPException
 from youtube_transcript_api import (
     NoTranscriptFound,
@@ -166,6 +167,13 @@ def _fetch_transcript_attempt(video_id: str, use_proxy: bool) -> tuple[str, str]
     (errori "definitivi", non ha senso ritentare) oppure IpBlocked / RequestBlocked
     (errori "temporanei" dovuti al blocco IP/rate-limit di YouTube: qui ha senso
     ritentare, eventualmente cambiando percorso di rete).
+
+    NB2: la chiamata finale per scaricare il testo vero e proprio (transcript.fetch())
+    usa una richiesta HTTP "grezza" della libreria `requests`, che sui 429 di YouTube
+    NON viene convertita in IpBlocked/RequestBlocked ma risolve in un
+    requests.exceptions.RetryError (o altre sottoclassi di RequestException, es. per
+    problemi di connessione): va quindi trattata allo stesso modo di IpBlocked/
+    RequestBlocked, cioè come errore "temporaneo" su cui vale la pena ritentare.
     """
     ytt_api = _build_ytt_api(use_proxy)
     transcript_list = ytt_api.list(video_id)
@@ -208,7 +216,7 @@ def _fetch_transcript_sync(video_id: str) -> tuple[str, str]:
                 status_code=422,
                 detail="Non è stata trovata una trascrizione in inglese per questo video: assicurati che il video sia in lingua inglese.",
             )
-        except (IpBlocked, RequestBlocked):
+        except (IpBlocked, RequestBlocked, requests.exceptions.RequestException):
             if attempt_index < len(attempts) - 1:
                 continue  # errore temporaneo: prova il tentativo successivo
             raise HTTPException(

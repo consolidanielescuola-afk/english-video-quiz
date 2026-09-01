@@ -13,7 +13,10 @@ pronto per essere mostrato così com'è nel form del frontend.
 
 import os
 import re
+import threading
+import time
 from dataclasses import dataclass
+from typing import Optional
 
 import httpx
 from fastapi import HTTPException
@@ -35,12 +38,21 @@ MAX_DURATION_SECONDS = 10 * 60  # requisito di progetto: max 10 minuti
 # Webshare offre 10 proxy datacenter gratuiti (nessuna carta richiesta): se le
 # credenziali sono configurate le usiamo, altrimenti si prova senza proxy
 # (va benissimo in locale, dove l'IP di casa non è bloccato).
+#
+# NB: restando sul piano gratuito (scelta esplicita dell'utente per mantenere
+# il progetto a costo zero), questi proxy datacenter condivisi vengono comunque
+# rate-limitati da YouTube (429) in modo non deterministico: non c'è modo di
+# eliminare del tutto il rischio di fallimento senza passare a un proxy
+# residenziale a pagamento. Per massimizzare l'affidabilità restando gratis
+# si fanno più tentativi (vedi _fetch_transcript_sync) e si mette in cache il
+# risultato per video, così una classe intera che usa lo stesso video paga il
+# "costo" del primo tentativo una sola volta.
 WEBSHARE_PROXY_USERNAME = os.getenv("WEBSHARE_PROXY_USERNAME")
 WEBSHARE_PROXY_PASSWORD = os.getenv("WEBSHARE_PROXY_PASSWORD")
 
 
-def _build_ytt_api() -> YouTubeTranscriptApi:
-    if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
+def _build_ytt_api(use_proxy: bool) -> YouTubeTranscriptApi:
+    if use_proxy and WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
         return YouTubeTranscriptApi(
             proxy_config=WebshareProxyConfig(
                 proxy_username=WEBSHARE_PROXY_USERNAME,
@@ -48,6 +60,32 @@ def _build_ytt_api() -> YouTubeTranscriptApi:
             )
         )
     return YouTubeTranscriptApi()
+
+
+# Cache in memoria (per-processo, si svuota a ogni riavvio del servizio): evita
+# di richiamare YouTube per lo stesso video più volte nello stesso periodo,
+# utile perché più studenti della stessa classe generalmente usano lo stesso
+# video. Non serve altro (Redis, DB...) per un uso didattico non massivo.
+_TRANSCRIPT_CACHE: dict[str, tuple[float, str, str]] = {}
+_TRANSCRIPT_CACHE_TTL_SECONDS = 6 * 60 * 60  # 6 ore
+_transcript_cache_lock = threading.Lock()
+
+
+def _cache_get_transcript(video_id: str) -> Optional[tuple[str, str]]:
+    with _transcript_cache_lock:
+        entry = _TRANSCRIPT_CACHE.get(video_id)
+    if not entry:
+        return None
+    cached_at, text, lang = entry
+    if time.time() - cached_at > _TRANSCRIPT_CACHE_TTL_SECONDS:
+        return None
+    return text, lang
+
+
+def _cache_set_transcript(video_id: str, text: str, lang: str) -> None:
+    with _transcript_cache_lock:
+        _TRANSCRIPT_CACHE[video_id] = (time.time(), text, lang)
+
 
 VIDEO_ID_PATTERNS = [
     r"(?:v=|\/videos\/|embed\/|youtu\.be\/|\/v\/|\/e\/|watch\?v=)([a-zA-Z0-9_-]{11})",
@@ -119,52 +157,67 @@ async def _fetch_video_metadata(video_id: str) -> dict:
     }
 
 
-def _fetch_transcript_sync(video_id: str) -> tuple[str, str]:
-    """Chiamata sincrona (la libreria non è async): va eseguita in threadpool dal chiamante.
+def _fetch_transcript_attempt(video_id: str, use_proxy: bool) -> tuple[str, str]:
+    """Un singolo tentativo di recupero trascrizione, con o senza proxy.
 
     NB: dalla v1.x di youtube-transcript-api l'API è cambiata da classmethod
     (YouTubeTranscriptApi.list_transcripts(...)) a istanza (YouTubeTranscriptApi().list(...)).
+    Può sollevare TranscriptsDisabled / VideoUnavailable / NoTranscriptFound
+    (errori "definitivi", non ha senso ritentare) oppure IpBlocked / RequestBlocked
+    (errori "temporanei" dovuti al blocco IP/rate-limit di YouTube: qui ha senso
+    ritentare, eventualmente cambiando percorso di rete).
     """
-    ytt_api = _build_ytt_api()
-    try:
-        transcript_list = ytt_api.list(video_id)
-    except TranscriptsDisabled:
-        raise HTTPException(status_code=422, detail="I sottotitoli sono disabilitati per questo video: impossibile generare gli esercizi.")
-    except VideoUnavailable:
-        raise HTTPException(status_code=404, detail="Video non disponibile.")
-    except (IpBlocked, RequestBlocked):
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "YouTube ha temporaneamente bloccato le richieste dal server. "
-                "Riprova tra qualche minuto; se il problema persiste, contatta l'amministratore del sito "
-                "(potrebbe essere necessario configurare un proxy)."
-            ),
-        )
-
-    # Preferisci una trascrizione in inglese (manuale o auto-generata); se non esiste, errore chiaro.
-    try:
-        transcript = transcript_list.find_transcript(["en", "en-US", "en-GB"])
-    except NoTranscriptFound:
-        raise HTTPException(
-            status_code=422,
-            detail="Non è stata trovata una trascrizione in inglese per questo video: assicurati che il video sia in lingua inglese.",
-        )
-
+    ytt_api = _build_ytt_api(use_proxy)
+    transcript_list = ytt_api.list(video_id)
+    transcript = transcript_list.find_transcript(["en", "en-US", "en-GB"])
     language_code = transcript.language_code
-    try:
-        fetched = transcript.fetch()  # FetchedTranscript: iterabile di FetchedTranscriptSnippet(text, start, duration)
-    except (IpBlocked, RequestBlocked):
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "YouTube ha temporaneamente bloccato le richieste dal server. "
-                "Riprova tra qualche minuto; se il problema persiste, contatta l'amministratore del sito "
-                "(potrebbe essere necessario configurare un proxy)."
-            ),
-        )
+    fetched = transcript.fetch()  # FetchedTranscript: iterabile di FetchedTranscriptSnippet(text, start, duration)
     full_text = " ".join(snippet.text for snippet in fetched)
     return full_text, language_code
+
+
+def _fetch_transcript_sync(video_id: str) -> tuple[str, str]:
+    """Chiamata sincrona (la libreria non è async): va eseguita in threadpool dal chiamante.
+
+    Restando sul piano gratuito di Webshare, i proxy datacenter condivisi vengono
+    ogni tanto rate-limitati da YouTube in modo non prevedibile: per massimizzare le
+    probabilità di successo si tenta più volte, e si evita del tutto una nuova
+    richiesta a YouTube se il video è già stato processato di recente (cache).
+    """
+    cached = _cache_get_transcript(video_id)
+    if cached:
+        return cached
+
+    # Ordine dei tentativi: due volte con il proxy Webshare (se configurato: ogni
+    # tentativo apre una nuova connessione e può quindi capitare su un IP diverso
+    # del pool), poi un ultimo tentativo diretto senza proxy (a volte l'IP del
+    # server non è, in quel momento, tra quelli bloccati).
+    attempts = [True, True, False] if (WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD) else [False]
+
+    for attempt_index, use_proxy in enumerate(attempts):
+        try:
+            text, lang = _fetch_transcript_attempt(video_id, use_proxy)
+            _cache_set_transcript(video_id, text, lang)
+            return text, lang
+        except TranscriptsDisabled:
+            raise HTTPException(status_code=422, detail="I sottotitoli sono disabilitati per questo video: impossibile generare gli esercizi.")
+        except VideoUnavailable:
+            raise HTTPException(status_code=404, detail="Video non disponibile.")
+        except NoTranscriptFound:
+            raise HTTPException(
+                status_code=422,
+                detail="Non è stata trovata una trascrizione in inglese per questo video: assicurati che il video sia in lingua inglese.",
+            )
+        except (IpBlocked, RequestBlocked):
+            if attempt_index < len(attempts) - 1:
+                continue  # errore temporaneo: prova il tentativo successivo
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "YouTube sta limitando temporaneamente le richieste al servizio (succede con i proxy "
+                    "gratuiti). Riprova tra qualche minuto: spesso il tentativo successivo va a buon fine."
+                ),
+            )
 
 
 async def validate_and_fetch(url: str) -> ValidatedVideo:

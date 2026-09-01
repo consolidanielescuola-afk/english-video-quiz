@@ -21,19 +21,36 @@
     <!-- ============ VIEW 1: CONFIGURAZIONE ============ -->
     <section id="view-config">
       <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-        <h2 class="text-lg font-semibold mb-1">Genera una scheda da un video YouTube</h2>
-        <p class="text-sm text-slate-500 mb-6">Incolla l'URL di un video in inglese (max 10 minuti) e configura il quiz.</p>
+        <h2 class="text-lg font-semibold mb-1">Genera una scheda da un video</h2>
+        <p class="text-sm text-slate-500 mb-6">Usa un link YouTube oppure carica direttamente un file video in inglese (max 10 minuti) e configura il quiz.</p>
+
+        <!-- Selettore modalità: link YouTube oppure upload diretto -->
+        <div class="flex gap-2 mb-6 border border-slate-200 rounded-lg p-1 bg-slate-100 w-fit">
+          <button type="button" id="modeTabYoutube" class="mode-tab mode-tab-active">Link YouTube</button>
+          <button type="button" id="modeTabUpload" class="mode-tab">Carica un video</button>
+        </div>
 
         <form id="generateForm" class="space-y-6">
 
-          <!-- URL -->
-          <div>
+          <!-- URL YouTube -->
+          <div id="youtubeUrlField">
             <label for="youtubeUrl" class="block text-sm font-medium mb-1">URL video YouTube</label>
             <input
               type="url" id="youtubeUrl" name="youtubeUrl" required
               placeholder="https://www.youtube.com/watch?v=..."
               class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"
             />
+            <p class="text-xs text-slate-500 mt-1">Nota: su hosting gratuito YouTube a volte limita temporaneamente le richieste. Se il link non funziona, prova a caricare il video direttamente.</p>
+          </div>
+
+          <!-- Upload diretto -->
+          <div id="uploadField" class="hidden">
+            <label for="videoFile" class="block text-sm font-medium mb-1">File video</label>
+            <input
+              type="file" id="videoFile" name="videoFile" accept="video/*"
+              class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-indigo-50 file:text-indigo-700 file:font-medium"
+            />
+            <p class="text-xs text-slate-500 mt-1">Max 10 minuti, max 150 MB. Il video resta nel tuo browser: non viene salvato sul server, viene solo analizzato per creare gli esercizi.</p>
           </div>
 
           <!-- CEFR level -->
@@ -109,6 +126,7 @@
         <div class="aspect-video w-full rounded-lg overflow-hidden bg-black mb-6 no-print">
           <iframe id="videoIframe" class="w-full h-full" src="" title="Video" frameborder="0"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+          <video id="videoPlayer" class="hidden w-full h-full" controls></video>
         </div>
 
         <!-- Exercises injected here by app.js -->

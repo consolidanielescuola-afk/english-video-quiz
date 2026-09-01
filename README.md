@@ -1,6 +1,15 @@
 # EnglishQuiz from YouTube — Architettura e Guida al Progetto
 
-Web app che genera schede didattiche di inglese interattive (video + esercizi) a partire da un URL YouTube, con livello CEFR e tipologie di esercizio configurabili, correzione istantanea ed export PDF.
+Web app che genera schede didattiche di inglese interattive (video + esercizi) a partire da un URL YouTube **oppure da un video caricato direttamente dall'insegnante**, con livello CEFR e tipologie di esercizio configurabili, correzione istantanea ed export PDF.
+
+### Due percorsi per il video
+
+1. **Link YouTube** (`POST /api/generate`): trascrizione via `youtube-transcript-api`. Soggetto al rate-limiting descritto più sotto sugli hosting cloud gratuiti.
+2. **Upload diretto** (`POST /api/generate-from-file`): l'insegnante carica un file video, che viene inviato a Gemini (già usato per generare gli esercizi) anche per la trascrizione, usando la sua comprensione multimodale nativa. Questo percorso **non contatta mai YouTube**, quindi non soffre di alcun rate-limiting esterno — è il percorso consigliato quando quello YouTube risulta inaffidabile. Il file video:
+   - viene scritto in un file temporaneo sul server solo il tempo di caricarlo su Gemini, poi cancellato immediatamente (vedi `backend/services/video_upload_service.py`);
+   - **non viene mai salvato in modo permanente**, né riproposto ad altri utenti;
+   - per la riproduzione nella scheda, resta **esclusivamente nel browser dell'insegnante** (tramite `URL.createObjectURL`) — non viene ricaricato sul server una seconda volta.
+   - limiti: max 10 minuti, max 150 MB, deve contenere parlato in inglese comprensibile (altrimenti la scheda non viene generata, con un messaggio di errore chiaro).
 
 ---
 
@@ -55,6 +64,12 @@ Libreria Python che recupera i sottotitoli (anche auto-generati) senza bisogno d
 - La scheda è già una pagina HTML/CSS ben impaginata: la soluzione più robusta è **renderizzarla in un browser headless (Playwright) e stamparla in PDF** (`page.pdf()`), perché rispetta perfettamente CSS, `@media print`, interruzioni di pagina (`page-break-*`) e permette di generare due varianti (studente senza soluzioni / insegnante con soluzioni in pagina separata) semplicemente passando un parametro che aggiunge/rimuove una classe CSS prima dello screenshot.
 - Alternativa più semplice senza backend aggiuntivo: **`html2pdf.js`** (client-side, combina `html2canvas` + `jsPDF`) — più rapida da integrare ma con limiti di qualità tipografica su contenuti lunghi (rasterizza il contenuto, testo non selezionabile, meno controllo sui page-break). La includo come fallback per chi vuole evitare Playwright.
 - Sconsiglio `wkhtmltopdf` (progetto non più mantenuto attivamente) e la generazione "manuale" con ReportLab (troppo lavoro per replicare un layout HTML/CSS già pronto).
+**Upload diretto del video: Gemini Files API (`google-genai`)**
+- Stesso client Gemini già usato per generare gli esercizi: `client.files.upload(file=path)` carica il video, poi si attende (polling su `client.files.get`) che passi da `PROCESSING` ad `ACTIVE`, infine `client.models.generate_content(model=..., contents=[uploaded_file, prompt])` produce la trascrizione, chiedendo esplicitamente a Gemini di rispondere con sentinel (`NONENGLISH`, `NOSPEECH`) se il contenuto non è utilizzabile, così la validazione è la stessa gestione di errore già usata per il percorso YouTube.
+- La durata del video viene letta con `mutagen` (nessuna dipendenza da ffmpeg/binari esterni); se il formato non è riconosciuto si lascia semplicemente proseguire (Gemini stesso segnalerà eventuali problemi con il file).
+- Endpoint `multipart/form-data` (richiede il pacchetto `python-multipart`) invece di JSON, per poter inviare il file binario insieme a livello CEFR e tipologie di esercizio.
+
+- **Nota per il deploy su Render (o hosting nativi simili, non-Docker)**: Playwright scarica il browser Chromium in `~/.cache/ms-playwright` per default — una cartella FUORI dalla directory del progetto. Su Render, solo la directory del progetto viene "promossa" dall'ambiente di build a quello di runtime: il browser scaricato durante il build va quindi perso, e al primo utilizzo compare l'errore `BrowserType.launch: Executable doesn't exist`. La soluzione è impostare la variabile d'ambiente `PLAYWRIGHT_BROWSERS_PATH=0`, che dice a Playwright di installare il browser dentro la cartella del pacchetto stesso (quindi dentro il progetto, e quindi promossa correttamente). Va impostata *prima* del deploy (il browser va scaricato di nuovo con il nuovo percorso) — è già in `render.yaml` e va configurata a mano su Render se si crea il servizio dalla dashboard.
 
 ### Tabella riassuntiva
 

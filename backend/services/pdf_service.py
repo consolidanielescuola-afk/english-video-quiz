@@ -76,7 +76,13 @@ def _build_html(worksheet: Worksheet, include_answers: bool) -> str:
         {_render_answer_key_html(worksheet.exercises)}
         """
 
-    video_url = f"https://www.youtube.com/watch?v={worksheet.video.id}"
+    is_upload = worksheet.video.source == "upload"
+    video_url = "" if is_upload else f"https://www.youtube.com/watch?v={worksheet.video.id}"
+    video_meta_html = (
+        "Video caricato dall'insegnante (nessun link disponibile)"
+        if is_upload
+        else f'Video: <a href="{video_url}">{video_url}</a>'
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -103,7 +109,7 @@ def _build_html(worksheet: Worksheet, include_answers: bool) -> str:
 </head>
 <body>
   <h1>{worksheet.video.title}</h1>
-  <p class="meta">Channel: {worksheet.video.channel} &middot; Video: <a href="{video_url}">{video_url}</a></p>
+  <p class="meta">Channel: {worksheet.video.channel} &middot; {video_meta_html}</p>
   <span class="badge">CEFR {worksheet.level.value}</span>
   {exercises_html}
   {answer_key_html}

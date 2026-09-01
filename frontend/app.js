@@ -8,6 +8,8 @@ const API_BASE_URL = "https://english-video-quiz-backend.onrender.com";
 // ---- Stato applicazione ---------------------------------------------------
 let currentWorksheet = null; // ultima scheda generata (JSON dal backend)
 let isCorrected = false;
+let uploadMode = false; // false = link YouTube, true = file caricato dall'insegnante
+let currentVideoObjectUrl = null; // URL locale (URL.createObjectURL) del video caricato, per la vista scheda
 
 // ---- Riferimenti DOM --------------------------------------------------------
 const viewConfig = document.getElementById("view-config");
@@ -20,10 +22,18 @@ const generateBtnText = document.getElementById("generateBtnText");
 const generateSpinner = document.getElementById("generateSpinner");
 const formError = document.getElementById("formError");
 
+const modeTabYoutube = document.getElementById("modeTabYoutube");
+const modeTabUpload = document.getElementById("modeTabUpload");
+const youtubeUrlField = document.getElementById("youtubeUrlField");
+const uploadField = document.getElementById("uploadField");
+const youtubeUrlInput = document.getElementById("youtubeUrl");
+const videoFileInput = document.getElementById("videoFile");
+
 const worksheetTitle = document.getElementById("worksheetTitle");
 const worksheetMeta = document.getElementById("worksheetMeta");
 const levelBadge = document.getElementById("levelBadge");
 const videoIframe = document.getElementById("videoIframe");
+const videoPlayer = document.getElementById("videoPlayer");
 const exercisesContainer = document.getElementById("exercisesContainer");
 
 const correctBtn = document.getElementById("correctBtn");
@@ -44,6 +54,29 @@ const EXERCISE_LABELS = {
 };
 
 // =============================================================================
+// 0. SELEZIONE MODALITÀ: link YouTube oppure upload diretto del video
+// =============================================================================
+// Bypassa youtube-transcript-api (che sugli hosting cloud gratuiti YouTube a volte
+// rate-limita) permettendo all'insegnante di caricare il file video: la trascrizione
+// viene fatta da Gemini stesso, il video resta solo nel browser (mai salvato sul server).
+
+function setUploadMode(enabled) {
+  uploadMode = enabled;
+  modeTabYoutube.classList.toggle("mode-tab-active", !enabled);
+  modeTabUpload.classList.toggle("mode-tab-active", enabled);
+  youtubeUrlField.classList.toggle("hidden", enabled);
+  uploadField.classList.toggle("hidden", !enabled);
+  // "required" va spostato sul campo effettivamente visibile, altrimenti il browser
+  // blocca il submit chiedendo di compilare un campo nascosto.
+  youtubeUrlInput.required = !enabled;
+  videoFileInput.required = enabled;
+  hideError();
+}
+
+modeTabYoutube.addEventListener("click", () => setUploadMode(false));
+modeTabUpload.addEventListener("click", () => setUploadMode(true));
+
+// =============================================================================
 // 1. GENERAZIONE SCHEDA
 // =============================================================================
 
@@ -51,7 +84,6 @@ generateForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   hideError();
 
-  const youtubeUrl = document.getElementById("youtubeUrl").value.trim();
   const level = generateForm.querySelector('input[name="level"]:checked').value;
   const exerciseTypes = Array.from(
     generateForm.querySelectorAll('input[name="exerciseTypes"]:checked')
@@ -62,18 +94,39 @@ generateForm.addEventListener("submit", async (e) => {
     return;
   }
 
+  if (uploadMode && !videoFileInput.files[0]) {
+    showError("Seleziona un file video da caricare.");
+    return;
+  }
+
   setLoading(true);
 
   try {
-    const res = await fetch(`${API_BASE_URL}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        youtube_url: youtubeUrl,
-        level: level,
-        exercise_types: exerciseTypes,
-      }),
-    });
+    let res;
+
+    if (uploadMode) {
+      const file = videoFileInput.files[0];
+      const formData = new FormData();
+      formData.append("level", level);
+      formData.append("exercise_types", JSON.stringify(exerciseTypes));
+      formData.append("video", file);
+
+      res = await fetch(`${API_BASE_URL}/api/generate-from-file`, {
+        method: "POST",
+        body: formData, // niente header Content-Type: il browser imposta il boundary multipart corretto
+      });
+    } else {
+      const youtubeUrl = youtubeUrlInput.value.trim();
+      res = await fetch(`${API_BASE_URL}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          youtube_url: youtubeUrl,
+          level: level,
+          exercise_types: exerciseTypes,
+        }),
+      });
+    }
 
     const data = await res.json();
 
@@ -82,6 +135,14 @@ generateForm.addEventListener("submit", async (e) => {
       // (video non trovato, non in inglese, durata > 10 minuti, nessuna trascrizione...)
       showError(data.detail || "Si è verificato un errore durante la generazione.");
       return;
+    }
+
+    // Per il percorso upload, il video resta nel browser: creiamo un URL locale dal
+    // file selezionato (non viene mai inviato/salvato di nuovo, il file è già stato
+    // consumato dal fetch qui sopra e cancellato lato server dopo la trascrizione).
+    if (uploadMode) {
+      if (currentVideoObjectUrl) URL.revokeObjectURL(currentVideoObjectUrl);
+      currentVideoObjectUrl = URL.createObjectURL(videoFileInput.files[0]);
     }
 
     currentWorksheet = data;
@@ -123,7 +184,22 @@ function renderWorksheet(data) {
   worksheetTitle.textContent = data.video.title;
   worksheetMeta.textContent = `${data.video.channel} · ${formatDuration(data.video.duration_seconds)}`;
   levelBadge.textContent = data.level;
-  videoIframe.src = `https://www.youtube.com/embed/${data.video.id}`;
+
+  if (data.video.source === "upload") {
+    // Video caricato dall'insegnante: mai inviato di nuovo al server per la riproduzione,
+    // viene mostrato dal file locale tramite l'object URL creato al momento dell'upload.
+    videoIframe.classList.add("hidden");
+    videoIframe.src = "";
+    videoPlayer.classList.remove("hidden");
+    if (currentVideoObjectUrl) videoPlayer.src = currentVideoObjectUrl;
+  } else {
+    videoPlayer.classList.add("hidden");
+    videoPlayer.pause();
+    videoPlayer.removeAttribute("src");
+    videoPlayer.load();
+    videoIframe.classList.remove("hidden");
+    videoIframe.src = `https://www.youtube.com/embed/${data.video.id}`;
+  }
 
   exercisesContainer.innerHTML = "";
 

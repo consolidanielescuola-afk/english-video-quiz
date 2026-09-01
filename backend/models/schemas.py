@@ -111,6 +111,9 @@ class VideoInfo(BaseModel):
     title: str
     channel: str
     duration_seconds: int
+    # "youtube" = video linkato via URL YouTube (trascrizione da youtube-transcript-api)
+    # "upload"  = video caricato dall'insegnante (trascrizione da Gemini, video mai salvato sul server)
+    source: Literal["youtube", "upload"] = "youtube"
 
 
 class Worksheet(BaseModel):

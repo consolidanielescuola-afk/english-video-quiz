@@ -20,6 +20,21 @@
   color: white;
 }
 
+.mode-tab {
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.4rem 0.9rem;
+  border-radius: 0.4rem;
+  color: #64748b;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+.mode-tab-active {
+  background-color: white;
+  color: #4338ca;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
 .ex-checkbox {
   display: flex;
   align-items: center;

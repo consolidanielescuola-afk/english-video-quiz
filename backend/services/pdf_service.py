@@ -115,7 +115,13 @@ async def render_worksheet_pdf(worksheet: Worksheet, include_answers: bool = Fal
     html = _build_html(worksheet, include_answers)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch()
+        # NB: dalla v1.49 circa, Playwright usa di default un binario separato
+        # ("chromium-headless-shell") per il lancio headless, che sul build di
+        # Render non viene scaricato dal comando `playwright install chromium`
+        # (che scarica solo il Chromium "completo"). Specificando esplicitamente
+        # channel="chromium" si forza l'uso del Chromium completo già installato,
+        # senza dover cambiare il build command su Render.
+        browser = await p.chromium.launch(channel="chromium")
         try:
             page = await browser.new_page()
             await page.set_content(html, wait_until="networkidle")

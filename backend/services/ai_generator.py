@@ -34,7 +34,7 @@ from models.schemas import CEFRLevel, Exercise, ExerciseType
 
 # NB: verifica sempre l'elenco aggiornato dei modelli gratuiti su
 # https://ai.google.dev/gemini-api/docs/pricing (i modelli "Flash" sono quelli gratuiti)
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 MAX_TRANSCRIPT_CHARS = 12_000  # tronca trascrizioni molto lunghe per contenere costi/latenza
 
 _client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))

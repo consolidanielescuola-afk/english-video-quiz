@@ -48,6 +48,7 @@ Libreria Python che recupera i sottotitoli (anche auto-generati) senza bisogno d
 **Generazione esercizi: Google Gemini API (piano gratuito)**
 - Si invia la trascrizione (troncata/pulita) + un prompt strutturato che richiede **esclusivamente JSON** conforme a uno schema fisso (vedi `backend/services/ai_generator.py`), rinforzato anche a livello di API con `response_mime_type="application/json"`.
 - Scelto al posto di Claude/OpenAI perché la Gemini API mette a disposizione modelli "Flash" gratuiti (nessuna carta di credito richiesta), sufficienti per generare esercizi da un video di massimo 10 minuti. Il codice isola la chiamata all'LLM in un'unica funzione (`_call_llm`), quindi passare a Claude o OpenAI in futuro (se serve più qualità o quota) richiede di toccare solo quella funzione.
+- **Nota sui nomi dei modelli**: Google ritira periodicamente i modelli più vecchi (es. `gemini-2.5-flash` è stato dismesso per i nuovi utenti a favore di `gemini-3.6-flash`, il modello usato di default in questo progetto). Se in futuro l'app smette di generare esercizi con un errore "model ... is no longer available", il messaggio di Google indica sempre il nome del modello sostitutivo da usare: basta aggiornare la variabile d'ambiente `GEMINI_MODEL` su Render (Settings → Environment) senza toccare il codice.
 - Compromesso da conoscere: i modelli gratuiti "Flash" sono meno raffinati di un modello di punta nel calibrare con precisione i livelli CEFR più alti (C1) o nel generare distrattori molto sottili per le multiple choice — per un uso didattico standard restano comunque adeguati.
 
 **Generazione PDF: Playwright (server-side) come soluzione principale**
@@ -63,7 +64,7 @@ Libreria Python che recupera i sottotitoli (anche auto-generati) senza bisogno d
 | Backend | FastAPI (Python 3.11+) | Async, validazione Pydantic, OpenAPI automatico |
 | Trascrizione | `youtube-transcript-api` | Nessuna API key, supporta sottotitoli auto-generati |
 | Metadati video (durata/lingua/esistenza) | YouTube Data API v3 | Unica fonte affidabile per durata e stato del video |
-| Generazione esercizi | Google Gemini API (`gemini-2.5-flash`, gratuito) | Nessun costo per uso didattico non massivo, output JSON vincolato |
+| Generazione esercizi | Google Gemini API (`gemini-3.6-flash`, gratuito) | Nessun costo per uso didattico non massivo, output JSON vincolato |
 | Correzione | JS lato client | Istantanea, nessuna latenza di rete |
 | PDF | Playwright (server) + html2pdf.js (fallback client) | Fedeltà di stampa massima; fallback semplice |
 | Hosting suggerito | Frontend: Netlify/Vercel — Backend: Render/Fly.io/Railway | Deploy gratuito/economico, HTTPS incluso |

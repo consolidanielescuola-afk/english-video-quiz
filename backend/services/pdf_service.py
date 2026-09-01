@@ -8,8 +8,8 @@ Due modalità:
   - include_answers=True  -> versione "insegnante": esercizi + pagina finale
     con interruzione di pagina (page-break-before) contenente tutte le soluzioni.
 
-Il video non può ovviamente essere "incorporato" in un PDF: viene mostrato
-come titolo + link cliccabile all'URL YouTube.
+Il video (caricato dall'insegnante, mai salvato sul server) non può ovviamente
+essere "incorporato" in un PDF: nella scheda compaiono solo titolo e durata.
 """
 
 from playwright.async_api import async_playwright
@@ -76,14 +76,6 @@ def _build_html(worksheet: Worksheet, include_answers: bool) -> str:
         {_render_answer_key_html(worksheet.exercises)}
         """
 
-    is_upload = worksheet.video.source == "upload"
-    video_url = "" if is_upload else f"https://www.youtube.com/watch?v={worksheet.video.id}"
-    video_meta_html = (
-        "Video caricato dall'insegnante (nessun link disponibile)"
-        if is_upload
-        else f'Video: <a href="{video_url}">{video_url}</a>'
-    )
-
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -109,8 +101,9 @@ def _build_html(worksheet: Worksheet, include_answers: bool) -> str:
 </head>
 <body>
   <h1>{worksheet.video.title}</h1>
-  <p class="meta">Channel: {worksheet.video.channel} &middot; {video_meta_html}</p>
+  <p class="meta">Video caricato dall'insegnante &middot; durata {worksheet.video.duration_seconds // 60} min</p>
   <span class="badge">CEFR {worksheet.level.value}</span>
+  {"<span class='badge' style='background:#dcfce7;color:#166534;margin-left:6px;'>Versione con soluzioni</span>" if include_answers else ""}
   {exercises_html}
   {answer_key_html}
 </body>

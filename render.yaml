@@ -13,15 +13,11 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
-      - key: YOUTUBE_API_KEY
-        sync: false
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
         sync: false
       - key: FRONTEND_ORIGIN
         sync: false
-      - key: WEBSHARE_PROXY_USERNAME
-        sync: false
-      - key: WEBSHARE_PROXY_PASSWORD
-        sync: false
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "0"

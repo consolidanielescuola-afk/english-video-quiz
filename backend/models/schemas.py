@@ -30,14 +30,10 @@ class ExerciseType(str, Enum):
     OPEN_ENDED = "open_ended"
 
 
-# ---------------------------------------------------------------------------
-# Richiesta di generazione
-# ---------------------------------------------------------------------------
-
-class GenerateRequest(BaseModel):
-    youtube_url: str
-    level: CEFRLevel
-    exercise_types: List[ExerciseType] = Field(min_length=1)
+# Numero massimo di esercizi selezionabili per ciascuna tipologia (lato form
+# "quante domande per tipo"): limita l'output dell'LLM a una dimensione
+# ragionevole e prevedibile.
+EXERCISE_COUNT_MAX = 10
 
 
 # ---------------------------------------------------------------------------
@@ -107,13 +103,10 @@ Exercise = Annotated[
 # ---------------------------------------------------------------------------
 
 class VideoInfo(BaseModel):
-    id: str
+    # Il video è sempre caricato dall'insegnante (nessun link/embed esterno):
+    # solo titolo (nome del file) e durata sono rilevanti per la scheda.
     title: str
-    channel: str
     duration_seconds: int
-    # "youtube" = video linkato via URL YouTube (trascrizione da youtube-transcript-api)
-    # "upload"  = video caricato dall'insegnante (trascrizione da Gemini, video mai salvato sul server)
-    source: Literal["youtube", "upload"] = "youtube"
 
 
 class Worksheet(BaseModel):

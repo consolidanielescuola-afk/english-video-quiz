@@ -1,17 +1,15 @@
 """
-Percorso alternativo a youtube_service.py: invece di prendere un URL YouTube,
-l'insegnante carica direttamente un file video dal proprio computer.
-
-Perché questo percorso esiste: youtube-transcript-api (usato da youtube_service.py)
-dipende da uno scraping non ufficiale delle pagine di YouTube, che sugli hosting
-cloud gratuiti viene spesso rate-limitato o bloccato (vedi commenti in
-youtube_service.py). Caricando il video direttamente, l'app non contatta più
-YouTube per niente: usiamo Gemini stesso (già usato per generare gli esercizi,
-già gratuito) anche per "guardare" il video e trascriverlo. Nessuna dipendenza
-in più da servizi terzi non ufficiali.
+L'insegnante carica direttamente un file video dal proprio computer: usiamo
+Gemini stesso (già usato per generare gli esercizi, già gratuito) anche per
+"guardare" il video e trascriverlo, senza dipendere da nessun servizio esterno
+non ufficiale (né YouTube né altri).
 
 Il file video NON viene salvato in modo permanente: viene scritto in un file
 temporaneo solo il tempo necessario per caricarlo su Gemini, poi cancellato.
+
+Nessun limite di durata: l'unico vincolo è la dimensione del file (vedi
+MAX_FILE_SIZE_BYTES), che limita indirettamente anche i tempi di
+upload/elaborazione sul piano gratuito di Render.
 """
 
 import os
@@ -22,9 +20,8 @@ from dataclasses import dataclass
 from fastapi import HTTPException, UploadFile
 from google import genai
 
-MAX_DURATION_SECONDS = 10 * 60  # stesso limite del percorso YouTube
-MAX_FILE_SIZE_BYTES = 150 * 1024 * 1024  # 150 MB: generoso per un video di massimo 10 minuti, ma limita l'uso di banda/memoria sul piano gratuito di Render
-FILE_PROCESSING_TIMEOUT_SECONDS = 90  # Gemini elabora il video caricato in modo asincrono prima di poterlo usare
+MAX_FILE_SIZE_BYTES = 150 * 1024 * 1024  # 150 MB: limita l'uso di banda/memoria sul piano gratuito di Render
+FILE_PROCESSING_TIMEOUT_SECONDS = 240  # Gemini elabora il video caricato in modo asincrono prima di poterlo usare; video più lunghi richiedono più tempo
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
@@ -119,12 +116,6 @@ async def validate_and_transcribe(video: UploadFile) -> ValidatedUploadedVideo:
             raise HTTPException(status_code=400, detail="Il file caricato è vuoto.")
 
         duration_seconds = _get_duration_seconds(tmp_path)
-        if duration_seconds > MAX_DURATION_SECONDS:
-            minutes = duration_seconds // 60
-            raise HTTPException(
-                status_code=422,
-                detail=f"Il video dura circa {minutes} minuti: la durata massima consentita è 10 minuti.",
-            )
 
         transcript_text = await run_in_threadpool(_upload_and_transcribe_sync, tmp_path, content_type)
 

@@ -1,15 +1,19 @@
 // ============================================================================
-// EnglishQuiz from YouTube — frontend logic
+// EnglishQuiz — frontend logic
 // Vanilla JS, nessuna dipendenza esterna a parte Tailwind (CDN, solo stile).
+// Il video è sempre caricato dall'insegnante: resta nel browser (object URL),
+// non viene mai salvato sul server né ricaricato una seconda volta.
 // ============================================================================
 
 const API_BASE_URL = "https://english-video-quiz-backend.onrender.com";
 
+const EXERCISE_TYPES = ["multiple_choice", "true_false", "gap_fill", "matching", "open_ended"];
+
 // ---- Stato applicazione ---------------------------------------------------
 let currentWorksheet = null; // ultima scheda generata (JSON dal backend)
 let isCorrected = false;
-let uploadMode = false; // false = link YouTube, true = file caricato dall'insegnante
-let currentVideoObjectUrl = null; // URL locale (URL.createObjectURL) del video caricato, per la vista scheda
+let solutionVisible = false;
+let currentVideoObjectUrl = null; // URL locale (URL.createObjectURL) del video caricato
 
 // ---- Riferimenti DOM --------------------------------------------------------
 const viewConfig = document.getElementById("view-config");
@@ -21,25 +25,21 @@ const generateBtn = document.getElementById("generateBtn");
 const generateBtnText = document.getElementById("generateBtnText");
 const generateSpinner = document.getElementById("generateSpinner");
 const formError = document.getElementById("formError");
-
-const modeTabYoutube = document.getElementById("modeTabYoutube");
-const modeTabUpload = document.getElementById("modeTabUpload");
-const youtubeUrlField = document.getElementById("youtubeUrlField");
-const uploadField = document.getElementById("uploadField");
-const youtubeUrlInput = document.getElementById("youtubeUrl");
 const videoFileInput = document.getElementById("videoFile");
 
 const worksheetTitle = document.getElementById("worksheetTitle");
 const worksheetMeta = document.getElementById("worksheetMeta");
 const levelBadge = document.getElementById("levelBadge");
-const videoIframe = document.getElementById("videoIframe");
 const videoPlayer = document.getElementById("videoPlayer");
 const exercisesContainer = document.getElementById("exercisesContainer");
 
 const correctBtn = document.getElementById("correctBtn");
 const resetBtn = document.getElementById("resetBtn");
+const showSolutionBtn = document.getElementById("showSolutionBtn");
 const downloadPdfBtn = document.getElementById("downloadPdfBtn");
 const pdfBtnText = document.getElementById("pdfBtnText");
+const downloadSolutionPdfBtn = document.getElementById("downloadSolutionPdfBtn");
+const pdfSolutionBtnText = document.getElementById("pdfSolutionBtnText");
 const scoreBanner = document.getElementById("scoreBanner");
 const scoreValue = document.getElementById("scoreValue");
 const scoreDetail = document.getElementById("scoreDetail");
@@ -54,29 +54,6 @@ const EXERCISE_LABELS = {
 };
 
 // =============================================================================
-// 0. SELEZIONE MODALITÀ: link YouTube oppure upload diretto del video
-// =============================================================================
-// Bypassa youtube-transcript-api (che sugli hosting cloud gratuiti YouTube a volte
-// rate-limita) permettendo all'insegnante di caricare il file video: la trascrizione
-// viene fatta da Gemini stesso, il video resta solo nel browser (mai salvato sul server).
-
-function setUploadMode(enabled) {
-  uploadMode = enabled;
-  modeTabYoutube.classList.toggle("mode-tab-active", !enabled);
-  modeTabUpload.classList.toggle("mode-tab-active", enabled);
-  youtubeUrlField.classList.toggle("hidden", enabled);
-  uploadField.classList.toggle("hidden", !enabled);
-  // "required" va spostato sul campo effettivamente visibile, altrimenti il browser
-  // blocca il submit chiedendo di compilare un campo nascosto.
-  youtubeUrlInput.required = !enabled;
-  videoFileInput.required = enabled;
-  hideError();
-}
-
-modeTabYoutube.addEventListener("click", () => setUploadMode(false));
-modeTabUpload.addEventListener("click", () => setUploadMode(true));
-
-// =============================================================================
 // 1. GENERAZIONE SCHEDA
 // =============================================================================
 
@@ -85,16 +62,23 @@ generateForm.addEventListener("submit", async (e) => {
   hideError();
 
   const level = generateForm.querySelector('input[name="level"]:checked').value;
-  const exerciseTypes = Array.from(
-    generateForm.querySelectorAll('input[name="exerciseTypes"]:checked')
-  ).map((el) => el.value);
 
-  if (exerciseTypes.length === 0) {
-    showError("Seleziona almeno una tipologia di esercizio.");
+  const exerciseCounts = {};
+  let total = 0;
+  for (const type of EXERCISE_TYPES) {
+    const input = generateForm.querySelector(`input[name="count_${type}"]`);
+    const count = Math.max(0, Math.min(10, parseInt(input.value, 10) || 0));
+    input.value = count; // normalizza eventuali valori fuori range digitati a mano
+    exerciseCounts[type] = count;
+    total += count;
+  }
+
+  if (total === 0) {
+    showError("Scegli almeno una domanda in una tipologia di esercizio.");
     return;
   }
 
-  if (uploadMode && !videoFileInput.files[0]) {
+  if (!videoFileInput.files[0]) {
     showError("Seleziona un file video da caricare.");
     return;
   }
@@ -102,48 +86,31 @@ generateForm.addEventListener("submit", async (e) => {
   setLoading(true);
 
   try {
-    let res;
+    const file = videoFileInput.files[0];
+    const formData = new FormData();
+    formData.append("level", level);
+    formData.append("exercise_counts", JSON.stringify(exerciseCounts));
+    formData.append("video", file);
 
-    if (uploadMode) {
-      const file = videoFileInput.files[0];
-      const formData = new FormData();
-      formData.append("level", level);
-      formData.append("exercise_types", JSON.stringify(exerciseTypes));
-      formData.append("video", file);
-
-      res = await fetch(`${API_BASE_URL}/api/generate-from-file`, {
-        method: "POST",
-        body: formData, // niente header Content-Type: il browser imposta il boundary multipart corretto
-      });
-    } else {
-      const youtubeUrl = youtubeUrlInput.value.trim();
-      res = await fetch(`${API_BASE_URL}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          youtube_url: youtubeUrl,
-          level: level,
-          exercise_types: exerciseTypes,
-        }),
-      });
-    }
+    const res = await fetch(`${API_BASE_URL}/api/generate-from-file`, {
+      method: "POST",
+      body: formData, // niente header Content-Type: il browser imposta il boundary multipart corretto
+    });
 
     const data = await res.json();
 
     if (!res.ok) {
       // Il backend restituisce {"detail": "messaggio leggibile"} sugli errori di validazione
-      // (video non trovato, non in inglese, durata > 10 minuti, nessuna trascrizione...)
+      // (file troppo grande, non in inglese, nessun parlato rilevato...)
       showError(data.detail || "Si è verificato un errore durante la generazione.");
       return;
     }
 
-    // Per il percorso upload, il video resta nel browser: creiamo un URL locale dal
-    // file selezionato (non viene mai inviato/salvato di nuovo, il file è già stato
-    // consumato dal fetch qui sopra e cancellato lato server dopo la trascrizione).
-    if (uploadMode) {
-      if (currentVideoObjectUrl) URL.revokeObjectURL(currentVideoObjectUrl);
-      currentVideoObjectUrl = URL.createObjectURL(videoFileInput.files[0]);
-    }
+    // Il video resta nel browser: creiamo un URL locale dal file selezionato (il file è
+    // già stato inviato/consumato dal fetch qui sopra e cancellato lato server dopo la
+    // trascrizione, non viene mai rispedito al server per la riproduzione).
+    if (currentVideoObjectUrl) URL.revokeObjectURL(currentVideoObjectUrl);
+    currentVideoObjectUrl = URL.createObjectURL(file);
 
     currentWorksheet = data;
     renderWorksheet(data);
@@ -176,30 +143,20 @@ function hideError() {
 
 function renderWorksheet(data) {
   isCorrected = false;
+  solutionVisible = false;
   resetBtn.classList.add("hidden");
+  showSolutionBtn.classList.add("hidden");
+  showSolutionBtn.textContent = "Mostra soluzione";
   scoreBanner.classList.add("hidden");
   correctBtn.disabled = false;
   correctBtn.textContent = "Correggi";
 
   worksheetTitle.textContent = data.video.title;
-  worksheetMeta.textContent = `${data.video.channel} · ${formatDuration(data.video.duration_seconds)}`;
+  worksheetMeta.textContent = formatDuration(data.video.duration_seconds);
   levelBadge.textContent = data.level;
 
-  if (data.video.source === "upload") {
-    // Video caricato dall'insegnante: mai inviato di nuovo al server per la riproduzione,
-    // viene mostrato dal file locale tramite l'object URL creato al momento dell'upload.
-    videoIframe.classList.add("hidden");
-    videoIframe.src = "";
-    videoPlayer.classList.remove("hidden");
-    if (currentVideoObjectUrl) videoPlayer.src = currentVideoObjectUrl;
-  } else {
-    videoPlayer.classList.add("hidden");
-    videoPlayer.pause();
-    videoPlayer.removeAttribute("src");
-    videoPlayer.load();
-    videoIframe.classList.remove("hidden");
-    videoIframe.src = `https://www.youtube.com/embed/${data.video.id}`;
-  }
+  videoPlayer.pause();
+  if (currentVideoObjectUrl) videoPlayer.src = currentVideoObjectUrl;
 
   exercisesContainer.innerHTML = "";
 
@@ -245,7 +202,8 @@ function renderExercise(ex, idx) {
             </label>`
             )
             .join("")}
-        </div>`;
+        </div>
+        <div class="solution-text hidden" data-solution>✅ Risposta corretta: ${ex.options[ex.correct_index]}</div>`;
       break;
 
     case "true_false":
@@ -258,7 +216,8 @@ function renderExercise(ex, idx) {
           <label class="flex items-center gap-2 cursor-pointer">
             <input type="radio" name="${ex.id}" value="false" class="accent-indigo-600" /> False
           </label>
-        </div>`;
+        </div>
+        <div class="solution-text hidden" data-solution>✅ Risposta corretta: ${ex.correct ? "True" : "False"}</div>`;
       break;
 
     case "gap_fill": {
@@ -272,7 +231,10 @@ function renderExercise(ex, idx) {
         }
         return acc;
       }, "");
-      wrapper.innerHTML = `<p class="font-medium leading-8">${idx + 1}. ${html}</p>`;
+      const answersList = ex.blanks.map((b) => b.answers[0]).join(", ");
+      wrapper.innerHTML = `
+        <p class="font-medium leading-8">${idx + 1}. ${html}</p>
+        <div class="solution-text hidden" data-solution>✅ Risposte corrette: ${answersList}</div>`;
       break;
     }
 
@@ -292,7 +254,11 @@ function renderExercise(ex, idx) {
         </div>`
         )
         .join("");
-      wrapper.innerHTML = `<p class="font-medium mb-2">${idx + 1}. Abbina ogni elemento alla definizione corretta.</p><div class="space-y-2">${rows}</div>`;
+      const solutionRows = ex.pairs.map((p) => `${p.left} → ${p.right}`).join("<br />");
+      wrapper.innerHTML = `
+        <p class="font-medium mb-2">${idx + 1}. Abbina ogni elemento alla definizione corretta.</p>
+        <div class="space-y-2">${rows}</div>
+        <div class="solution-text hidden" data-solution>✅ Soluzione:<br />${solutionRows}</div>`;
       break;
     }
 
@@ -300,7 +266,7 @@ function renderExercise(ex, idx) {
       wrapper.innerHTML = `
         <p class="font-medium mb-2">${idx + 1}. ${ex.question}</p>
         <textarea class="w-full border border-slate-300 rounded-lg px-3 py-2 min-h-[80px]" placeholder="Scrivi la tua risposta..."></textarea>
-        <div class="model-answer-box hidden" data-model-answer>💡 Possibile risposta: ${ex.model_answer}</div>`;
+        <div class="solution-text hidden" data-solution>💡 Possibile risposta: ${ex.model_answer}</div>`;
       break;
   }
 
@@ -308,6 +274,7 @@ function renderExercise(ex, idx) {
 }
 
 function formatDuration(seconds) {
+  if (!seconds) return "";
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${String(s).padStart(2, "0")} min`;
@@ -330,7 +297,7 @@ function escapeHtmlAttr(str) {
 }
 
 // =============================================================================
-// 3. CORREZIONE ISTANTANEA
+// 3. CORREZIONE ISTANTANEA + MOSTRA SOLUZIONE
 // =============================================================================
 
 correctBtn.addEventListener("click", () => {
@@ -373,7 +340,6 @@ correctBtn.addEventListener("click", () => {
         input.classList.remove("answer-correct", "answer-incorrect");
         input.classList.add(isRight ? "answer-correct" : "answer-incorrect");
         input.disabled = true;
-        if (!isRight) input.title = `Risposta corretta: ${ex.blanks[gapIndex].answers[0]}`;
       });
     }
 
@@ -392,12 +358,10 @@ correctBtn.addEventListener("click", () => {
     }
 
     if (exType === "open_ended") {
-      // Non auto-correggibile in modo affidabile: mostriamo la risposta modello
-      // per l'auto-valutazione dello studente, esclusa dal punteggio.
+      // Non auto-correggibile in modo affidabile: la risposta modello si vede solo
+      // premendo "Mostra soluzione", esclusa dal punteggio.
       const textarea = wrapper.querySelector("textarea");
-      const modelBox = wrapper.querySelector("[data-model-answer]");
       if (textarea) textarea.disabled = true;
-      if (modelBox) modelBox.classList.remove("hidden");
     }
   });
 
@@ -409,6 +373,15 @@ correctBtn.addEventListener("click", () => {
   isCorrected = true;
   correctBtn.disabled = true;
   resetBtn.classList.remove("hidden");
+  showSolutionBtn.classList.remove("hidden");
+});
+
+showSolutionBtn.addEventListener("click", () => {
+  solutionVisible = !solutionVisible;
+  document.querySelectorAll("[data-solution]").forEach((el) => {
+    el.classList.toggle("hidden", !solutionVisible);
+  });
+  showSolutionBtn.textContent = solutionVisible ? "Nascondi soluzione" : "Mostra soluzione";
 });
 
 function markRadioGroup(wrapper, name, correctValue) {
@@ -432,21 +405,19 @@ resetBtn.addEventListener("click", () => {
 });
 
 // =============================================================================
-// 4. EXPORT PDF
+// 4. EXPORT PDF (versione studente + versione con soluzioni)
 // =============================================================================
 
-downloadPdfBtn.addEventListener("click", async () => {
+async function exportPdf(includeAnswers, button, buttonTextEl, defaultLabel) {
   if (!currentWorksheet) return;
-  pdfBtnText.textContent = "Generazione PDF...";
-  downloadPdfBtn.disabled = true;
+  buttonTextEl.textContent = "Generazione PDF...";
+  button.disabled = true;
 
   try {
-    // Opzione principale: PDF generato server-side con Playwright (vedi backend/services/pdf_service.py)
-    // per un'impaginazione fedele e la versione con soluzioni su pagina separata.
     const res = await fetch(`${API_BASE_URL}/api/export-pdf`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ worksheet: currentWorksheet, include_answers: false }),
+      body: JSON.stringify({ worksheet: currentWorksheet, include_answers: includeAnswers }),
     });
 
     if (!res.ok) throw new Error("PDF generation failed");
@@ -455,20 +426,26 @@ downloadPdfBtn.addEventListener("click", async () => {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${slugify(currentWorksheet.video.title)}-${currentWorksheet.level}.pdf`;
+    const suffix = includeAnswers ? "-soluzioni" : "";
+    a.download = `${slugify(currentWorksheet.video.title)}-${currentWorksheet.level}${suffix}.pdf`;
     a.click();
     window.URL.revokeObjectURL(url);
   } catch (err) {
-    console.warn("Export server-side non disponibile, uso fallback client (window.print).", err);
+    console.warn("Export PDF non disponibile, uso fallback client (window.print).", err);
     // Fallback minimo senza librerie aggiuntive: usa il CSS @media print già definito in styles.css.
-    // Per un fallback client "vero PDF" senza backend si può integrare html2pdf.js:
-    //   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    //   html2pdf().from(document.getElementById('worksheetPrintArea')).save();
     window.print();
   } finally {
-    pdfBtnText.textContent = "Scarica PDF";
-    downloadPdfBtn.disabled = false;
+    buttonTextEl.textContent = defaultLabel;
+    button.disabled = false;
   }
+}
+
+downloadPdfBtn.addEventListener("click", () => {
+  exportPdf(false, downloadPdfBtn, pdfBtnText, "Scarica PDF");
+});
+
+downloadSolutionPdfBtn.addEventListener("click", () => {
+  exportPdf(true, downloadSolutionPdfBtn, pdfSolutionBtnText, "Scarica soluzione PDF");
 });
 
 function slugify(str) {

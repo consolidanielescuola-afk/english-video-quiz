@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>EnglishQuiz from YouTube</title>
+<title>EnglishQuiz</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="stylesheet" href="styles.css" />
 </head>
@@ -11,7 +11,7 @@
 
   <header class="bg-white border-b border-slate-200">
     <div class="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-      <h1 class="text-xl font-bold text-indigo-700">EnglishQuiz <span class="text-slate-400 font-normal">from YouTube</span></h1>
+      <h1 class="text-xl font-bold text-indigo-700">EnglishQuiz</h1>
       <span id="backToConfigBtn" class="hidden text-sm text-indigo-600 hover:underline cursor-pointer">← Nuova scheda</span>
     </div>
   </header>
@@ -21,44 +21,25 @@
     <!-- ============ VIEW 1: CONFIGURAZIONE ============ -->
     <section id="view-config">
       <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-        <h2 class="text-lg font-semibold mb-1">Genera una scheda da un video</h2>
-        <p class="text-sm text-slate-500 mb-6">Usa un link YouTube oppure carica direttamente un file video in inglese (max 10 minuti) e configura il quiz.</p>
-
-        <!-- Selettore modalità: link YouTube oppure upload diretto -->
-        <div class="flex gap-2 mb-6 border border-slate-200 rounded-lg p-1 bg-slate-100 w-fit">
-          <button type="button" id="modeTabYoutube" class="mode-tab mode-tab-active">Link YouTube</button>
-          <button type="button" id="modeTabUpload" class="mode-tab">Carica un video</button>
-        </div>
+        <h2 class="text-lg font-semibold mb-1">Genera una scheda dal tuo video</h2>
+        <p class="text-sm text-slate-500 mb-6">Carica un file video in inglese e configura il quiz. Il video resta nel tuo browser: non viene salvato sul server.</p>
 
         <form id="generateForm" class="space-y-6">
 
-          <!-- URL YouTube -->
-          <div id="youtubeUrlField">
-            <label for="youtubeUrl" class="block text-sm font-medium mb-1">URL video YouTube</label>
-            <input
-              type="url" id="youtubeUrl" name="youtubeUrl" required
-              placeholder="https://www.youtube.com/watch?v=..."
-              class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-            />
-            <p class="text-xs text-slate-500 mt-1">Nota: su hosting gratuito YouTube a volte limita temporaneamente le richieste. Se il link non funziona, prova a caricare il video direttamente.</p>
-          </div>
-
           <!-- Upload diretto -->
-          <div id="uploadField" class="hidden">
+          <div>
             <label for="videoFile" class="block text-sm font-medium mb-1">File video</label>
             <input
-              type="file" id="videoFile" name="videoFile" accept="video/*"
+              type="file" id="videoFile" name="videoFile" accept="video/*" required
               class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-indigo-50 file:text-indigo-700 file:font-medium"
             />
-            <p class="text-xs text-slate-500 mt-1">Max 10 minuti, max 150 MB. Il video resta nel tuo browser: non viene salvato sul server, viene solo analizzato per creare gli esercizi.</p>
+            <p class="text-xs text-slate-500 mt-1">Max 150 MB (nessun limite di durata). Il video viene analizzato solo per creare gli esercizi, non viene mai salvato in modo permanente.</p>
           </div>
 
           <!-- CEFR level -->
           <div>
             <label class="block text-sm font-medium mb-2">Livello CEFR</label>
             <div class="flex flex-wrap gap-2">
-              <!-- radio pills -->
-              <template id="levelTemplate"></template>
               <label class="cefr-pill"><input type="radio" name="level" value="A1" class="peer sr-only" /><span>A1</span></label>
               <label class="cefr-pill"><input type="radio" name="level" value="A2" class="peer sr-only" /><span>A2</span></label>
               <label class="cefr-pill"><input type="radio" name="level" value="B1" class="peer sr-only" checked /><span>B1</span></label>
@@ -67,31 +48,32 @@
             </div>
           </div>
 
-          <!-- Exercise types -->
+          <!-- Exercise counts per type -->
           <div>
-            <label class="block text-sm font-medium mb-2">Tipologie di esercizio</label>
-            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              <label class="ex-checkbox">
-                <input type="checkbox" name="exerciseTypes" value="multiple_choice" checked />
+            <label class="block text-sm font-medium mb-2">Numero di domande per tipologia</label>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div class="ex-count-row">
                 <span>Multiple choice</span>
-              </label>
-              <label class="ex-checkbox">
-                <input type="checkbox" name="exerciseTypes" value="true_false" checked />
+                <input type="number" name="count_multiple_choice" min="0" max="10" value="3" class="ex-count-input" />
+              </div>
+              <div class="ex-count-row">
                 <span>True / False</span>
-              </label>
-              <label class="ex-checkbox">
-                <input type="checkbox" name="exerciseTypes" value="gap_fill" />
+                <input type="number" name="count_true_false" min="0" max="10" value="2" class="ex-count-input" />
+              </div>
+              <div class="ex-count-row">
                 <span>Gap fill / Cloze</span>
-              </label>
-              <label class="ex-checkbox">
-                <input type="checkbox" name="exerciseTypes" value="matching" />
+                <input type="number" name="count_gap_fill" min="0" max="10" value="0" class="ex-count-input" />
+              </div>
+              <div class="ex-count-row">
                 <span>Matching</span>
-              </label>
-              <label class="ex-checkbox">
-                <input type="checkbox" name="exerciseTypes" value="open_ended" />
+                <input type="number" name="count_matching" min="0" max="10" value="0" class="ex-count-input" />
+              </div>
+              <div class="ex-count-row">
                 <span>Open ended</span>
-              </label>
+                <input type="number" name="count_open_ended" min="0" max="10" value="0" class="ex-count-input" />
+              </div>
             </div>
+            <p class="text-xs text-slate-500 mt-1">Metti 0 per escludere una tipologia. Massimo 10 domande per tipo.</p>
           </div>
 
           <div id="formError" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
@@ -122,11 +104,9 @@
           <span id="levelBadge" class="text-xs font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full"></span>
         </div>
 
-        <!-- Video embed -->
+        <!-- Video: riprodotto localmente dal file caricato, mai ricaricato sul server -->
         <div class="aspect-video w-full rounded-lg overflow-hidden bg-black mb-6 no-print">
-          <iframe id="videoIframe" class="w-full h-full" src="" title="Video" frameborder="0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-          <video id="videoPlayer" class="hidden w-full h-full" controls></video>
+          <video id="videoPlayer" class="w-full h-full" controls></video>
         </div>
 
         <!-- Exercises injected here by app.js -->
@@ -134,15 +114,21 @@
       </div>
 
       <!-- Actions -->
-      <div class="flex flex-wrap gap-3 mt-6 no-print">
+      <div class="flex flex-wrap items-center gap-3 mt-6 no-print">
         <button id="correctBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-5 py-2.5 rounded-lg transition">
           Correggi
         </button>
         <button id="resetBtn" class="hidden bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium px-5 py-2.5 rounded-lg transition">
           Riprova
         </button>
+        <button id="showSolutionBtn" class="hidden bg-amber-100 hover:bg-amber-200 text-amber-800 font-medium px-5 py-2.5 rounded-lg transition">
+          Mostra soluzione
+        </button>
         <button id="downloadPdfBtn" class="bg-slate-800 hover:bg-slate-900 text-white font-medium px-5 py-2.5 rounded-lg transition inline-flex items-center gap-2">
           <span id="pdfBtnText">Scarica PDF</span>
+        </button>
+        <button id="downloadSolutionPdfBtn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-5 py-2.5 rounded-lg transition inline-flex items-center gap-2 border border-slate-300">
+          <span id="pdfSolutionBtnText">Scarica soluzione PDF</span>
         </button>
 
         <div id="scoreBanner" class="hidden ml-auto text-right">

@@ -2,15 +2,15 @@
 Entrypoint FastAPI.
 
 Endpoint:
-  POST /api/generate            -> valida un URL YouTube, recupera la trascrizione, chiama
-                                    l'LLM, restituisce la scheda completa (Worksheet) come JSON.
-  POST /api/generate-from-file  -> stesso risultato, ma a partire da un file video caricato
-                                    dall'insegnante (nessuna dipendenza da YouTube): la
+  POST /api/generate-from-file  -> a partire da un file video caricato dall'insegnante,
+                                    genera la scheda completa (Worksheet) come JSON: la
                                     trascrizione viene prodotta da Gemini stesso guardando
-                                    il video. Il file viene cancellato subito dopo l'uso,
+                                    il video (nessuna dipendenza da servizi esterni come
+                                    YouTube). Il file viene cancellato subito dopo l'uso,
                                     non viene mai salvato in modo permanente sul server.
   POST /api/export-pdf          -> renderizza la scheda ricevuta in PDF (Playwright) e la
-                                    restituisce come file scaricabile.
+                                    restituisce come file scaricabile (versione studente o,
+                                    con include_answers=true, versione con le soluzioni).
 
 Esegui con:  uvicorn main:app --reload --port 8000
 """
@@ -28,10 +28,17 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from models.schemas import CEFRLevel, ExerciseType, ExportPdfRequest, GenerateRequest, VideoInfo, Worksheet
-from services import ai_generator, pdf_service, video_upload_service, youtube_service
+from models.schemas import (
+    CEFRLevel,
+    EXERCISE_COUNT_MAX,
+    ExerciseType,
+    ExportPdfRequest,
+    VideoInfo,
+    Worksheet,
+)
+from services import ai_generator, pdf_service, video_upload_service
 
-app = FastAPI(title="EnglishQuiz from YouTube API")
+app = FastAPI(title="EnglishQuiz da video caricato")
 
 # In locale (nessuna FRONTEND_ORIGIN impostata) accetta qualsiasi origine.
 # In produzione impostare FRONTEND_ORIGIN sull'URL esatto del frontend (es. Netlify)
@@ -50,16 +57,54 @@ async def health():
     return {"status": "ok"}
 
 
-@app.post("/api/generate", response_model=Worksheet)
-async def generate_worksheet(payload: GenerateRequest):
-    # 1. Validazione video (esistenza, lingua, durata) + trascrizione
-    validated = await youtube_service.validate_and_fetch(payload.youtube_url)
+def _parse_exercise_counts(raw: str) -> dict[ExerciseType, int]:
+    """Valida il JSON '{"multiple_choice": 3, "true_false": 2, ...}' inviato dal form."""
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="exercise_counts non valido.")
 
-    # 2. Generazione esercizi via LLM, già validati contro lo schema Pydantic
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="exercise_counts deve essere un oggetto.")
+
+    counts: dict[ExerciseType, int] = {}
+    for key, value in parsed.items():
+        try:
+            ex_type = ExerciseType(key)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Tipologia di esercizio sconosciuta: {key}.")
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise HTTPException(status_code=400, detail=f"Numero di esercizi non valido per {key}.")
+        if value > EXERCISE_COUNT_MAX:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Massimo {EXERCISE_COUNT_MAX} esercizi per tipologia (richiesti {value} per {key}).",
+            )
+        counts[ex_type] = value
+
+    if sum(counts.values()) == 0:
+        raise HTTPException(status_code=400, detail="Scegli almeno un esercizio in una tipologia.")
+
+    return counts
+
+
+@app.post("/api/generate-from-file", response_model=Worksheet)
+async def generate_worksheet_from_file(
+    level: CEFRLevel = Form(...),
+    exercise_counts: str = Form(...),  # JSON: {"multiple_choice": 3, "true_false": 2, ...}
+    video: UploadFile = File(...),
+):
+    counts = _parse_exercise_counts(exercise_counts)
+
+    # 1. Validazione file + trascrizione via Gemini (il video non viene salvato: cancellato
+    #    subito dopo l'upload verso Gemini, vedi video_upload_service.py)
+    validated = await video_upload_service.validate_and_transcribe(video)
+
+    # 2. Generazione esercizi via LLM, nel numero richiesto per ciascuna tipologia
     exercises = await ai_generator.generate_exercises(
         transcript=validated.transcript_text,
-        level=payload.level,
-        exercise_types=payload.exercise_types,
+        level=level,
+        exercise_counts=counts,
     )
 
     # Garantisce id univoci anche se l'LLM ne generasse di duplicati per errore
@@ -71,53 +116,8 @@ async def generate_worksheet(payload: GenerateRequest):
 
     return Worksheet(
         video=VideoInfo(
-            id=validated.id,
             title=validated.title,
-            channel=validated.channel,
             duration_seconds=validated.duration_seconds,
-        ),
-        level=payload.level,
-        exercises=exercises,
-    )
-
-
-@app.post("/api/generate-from-file", response_model=Worksheet)
-async def generate_worksheet_from_file(
-    level: CEFRLevel = Form(...),
-    exercise_types: str = Form(...),  # JSON array di stringhe, es. '["multiple_choice","true_false"]'
-    video: UploadFile = File(...),
-):
-    try:
-        parsed_types = [ExerciseType(t) for t in json.loads(exercise_types)]
-    except (ValueError, TypeError, json.JSONDecodeError):
-        raise HTTPException(status_code=400, detail="exercise_types non valido.")
-    if not parsed_types:
-        raise HTTPException(status_code=400, detail="Seleziona almeno una tipologia di esercizio.")
-
-    # 1. Validazione file + trascrizione via Gemini (il video non viene salvato: cancellato
-    #    subito dopo l'upload verso Gemini, vedi video_upload_service.py)
-    validated = await video_upload_service.validate_and_transcribe(video)
-
-    # 2. Generazione esercizi via LLM: stessa funzione usata dal percorso YouTube
-    exercises = await ai_generator.generate_exercises(
-        transcript=validated.transcript_text,
-        level=level,
-        exercise_types=parsed_types,
-    )
-
-    seen_ids = set()
-    for ex in exercises:
-        if ex.id in seen_ids:
-            ex.id = f"{ex.id}-{uuid.uuid4().hex[:4]}"
-        seen_ids.add(ex.id)
-
-    return Worksheet(
-        video=VideoInfo(
-            id="",
-            title=validated.title,
-            channel="Video caricato dall'insegnante",
-            duration_seconds=validated.duration_seconds,
-            source="upload",
         ),
         level=level,
         exercises=exercises,
@@ -134,7 +134,8 @@ async def export_pdf(payload: ExportPdfRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Errore nella generazione del PDF: {e}")
 
-    filename = f"{payload.worksheet.video.title[:40]}.pdf".replace("/", "-")
+    suffix = "-soluzioni" if payload.include_answers else ""
+    filename = f"{payload.worksheet.video.title[:40]}{suffix}.pdf".replace("/", "-")
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

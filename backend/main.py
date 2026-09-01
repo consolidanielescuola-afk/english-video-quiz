@@ -31,6 +31,7 @@ from fastapi.responses import Response
 from models.schemas import (
     CEFRLevel,
     EXERCISE_COUNT_MAX,
+    EXERCISE_COUNT_TOTAL_MAX,
     ExerciseType,
     ExportPdfRequest,
     VideoInfo,
@@ -82,8 +83,14 @@ def _parse_exercise_counts(raw: str) -> dict[ExerciseType, int]:
             )
         counts[ex_type] = value
 
-    if sum(counts.values()) == 0:
+    total = sum(counts.values())
+    if total == 0:
         raise HTTPException(status_code=400, detail="Scegli almeno un esercizio in una tipologia.")
+    if total > EXERCISE_COUNT_TOTAL_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Massimo {EXERCISE_COUNT_TOTAL_MAX} esercizi in totale (richiesti {total}).",
+        )
 
     return counts
 

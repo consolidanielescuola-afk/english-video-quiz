@@ -17,29 +17,51 @@ from playwright.async_api import async_playwright
 from models.schemas import Worksheet
 
 
-def _render_exercise_html(ex, index: int) -> str:
+def _render_solution_html(ex) -> str:
+    """Riga di soluzione mostrata direttamente sotto l'esercizio, nella versione
+    "con soluzioni": stesso contenuto del "Mostra soluzione" della pagina web, così
+    la differenza rispetto alla versione studente è visibile subito, non solo
+    nell'answer key finale."""
+    if ex.type == "multiple_choice":
+        return f"<div class='solution'>✔ Risposta corretta: {ex.options[ex.correct_index]}</div>"
+    if ex.type == "true_false":
+        return f"<div class='solution'>✔ Risposta corretta: {'True' if ex.correct else 'False'}</div>"
+    if ex.type == "gap_fill":
+        answers = ", ".join(b.answers[0] for b in ex.blanks)
+        return f"<div class='solution'>✔ Risposte corrette: {answers}</div>"
+    if ex.type == "matching":
+        pairs_str = ", ".join(f"{p.left} → {p.right}" for p in ex.pairs)
+        return f"<div class='solution'>✔ Soluzione: {pairs_str}</div>"
+    if ex.type == "open_ended":
+        return f"<div class='solution'>💡 Possibile risposta: {ex.model_answer}</div>"
+    return ""
+
+
+def _render_exercise_html(ex, index: int, include_answers: bool) -> str:
+    solution_html = _render_solution_html(ex) if include_answers else ""
+
     if ex.type == "multiple_choice":
         options = "".join(f"<div class='option'>○ {opt}</div>" for opt in ex.options)
-        return f"<div class='exercise'><p class='q'>{index}. {ex.question}</p>{options}</div>"
+        return f"<div class='exercise'><p class='q'>{index}. {ex.question}</p>{options}{solution_html}</div>"
 
     if ex.type == "true_false":
         return f"""<div class='exercise'><p class='q'>{index}. {ex.statement}</p>
-            <div class='option'>○ True &nbsp;&nbsp;&nbsp; ○ False</div></div>"""
+            <div class='option'>○ True &nbsp;&nbsp;&nbsp; ○ False</div>{solution_html}</div>"""
 
     if ex.type == "gap_fill":
         text = ex.text.replace("___", "<span class='blank'>&nbsp;</span>")
-        return f"<div class='exercise'><p class='q'>{index}. {text}</p></div>"
+        return f"<div class='exercise'><p class='q'>{index}. {text}</p>{solution_html}</div>"
 
     if ex.type == "matching":
         left_col = "".join(f"<div class='match-row'>{i + 1}. {p.left}</div>" for i, p in enumerate(ex.pairs))
         right_labels = "ABCDEFGH"
         right_col = "".join(f"<div class='match-row'>{right_labels[i]}. {p.right}</div>" for i, p in enumerate(ex.pairs))
         return f"""<div class='exercise'><p class='q'>{index}. Match each item on the left with the correct definition on the right.</p>
-            <div class='match-grid'><div>{left_col}</div><div>{right_col}</div></div></div>"""
+            <div class='match-grid'><div>{left_col}</div><div>{right_col}</div></div>{solution_html}</div>"""
 
     if ex.type == "open_ended":
         return f"""<div class='exercise'><p class='q'>{index}. {ex.question}</p>
-            <div class='answer-lines'></div><div class='answer-lines'></div></div>"""
+            <div class='answer-lines'></div><div class='answer-lines'></div>{solution_html}</div>"""
 
     return ""
 
@@ -65,7 +87,7 @@ def _render_answer_key_html(exercises) -> str:
 
 def _build_html(worksheet: Worksheet, include_answers: bool) -> str:
     exercises_html = "".join(
-        _render_exercise_html(ex, i + 1) for i, ex in enumerate(worksheet.exercises)
+        _render_exercise_html(ex, i + 1, include_answers) for i, ex in enumerate(worksheet.exercises)
     )
 
     answer_key_html = ""
@@ -96,6 +118,8 @@ def _build_html(worksheet: Worksheet, include_answers: bool) -> str:
   .answer-lines {{ border-bottom: 1px solid #cbd5e1; height: 18px; margin: 4px 0; }}
   .page-break {{ break-before: page; }}
   .answer-row {{ margin-bottom: 4px; }}
+  .solution {{ margin-top: 6px; padding: 4px 8px; background: #fffbeb; border-left: 3px solid #f59e0b;
+               color: #78350f; font-size: 10.5pt; border-radius: 3px; }}
   a {{ color: #4338ca; }}
 </style>
 </head>

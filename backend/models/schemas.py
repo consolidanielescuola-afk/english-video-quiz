@@ -35,6 +35,9 @@ class ExerciseType(str, Enum):
 # ragionevole e prevedibile.
 EXERCISE_COUNT_MAX = 10
 
+# Numero massimo di esercizi in totale, sommando tutte le tipologie.
+EXERCISE_COUNT_TOTAL_MAX = 20
+
 
 # ---------------------------------------------------------------------------
 # Esercizi (discriminated union su "type")

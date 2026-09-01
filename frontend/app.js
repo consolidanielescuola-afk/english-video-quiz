@@ -8,6 +8,8 @@
 const API_BASE_URL = "https://english-video-quiz-backend.onrender.com";
 
 const EXERCISE_TYPES = ["multiple_choice", "true_false", "gap_fill", "matching", "open_ended"];
+const EXERCISE_COUNT_MAX = 10; // per tipologia, deve restare allineato a EXERCISE_COUNT_MAX nel backend
+const EXERCISE_COUNT_TOTAL_MAX = 20; // totale su tutte le tipologie, allineato a EXERCISE_COUNT_TOTAL_MAX nel backend
 
 // ---- Stato applicazione ---------------------------------------------------
 let currentWorksheet = null; // ultima scheda generata (JSON dal backend)
@@ -54,6 +56,38 @@ const EXERCISE_LABELS = {
 };
 
 // =============================================================================
+// 0. CONTATORE TOTALE DOMANDE (aggiornato live mentre l'insegnante digita)
+// =============================================================================
+
+const totalCountValue = document.getElementById("totalCountValue");
+const totalCountHint = document.getElementById("totalCountHint");
+const exerciseCountInputs = EXERCISE_TYPES.map((type) =>
+  generateForm.querySelector(`input[name="count_${type}"]`)
+);
+
+function readExerciseCounts() {
+  const counts = {};
+  let total = 0;
+  EXERCISE_TYPES.forEach((type, i) => {
+    const input = exerciseCountInputs[i];
+    const count = Math.max(0, Math.min(EXERCISE_COUNT_MAX, parseInt(input.value, 10) || 0));
+    counts[type] = count;
+    total += count;
+  });
+  return { counts, total };
+}
+
+function updateTotalCountHint() {
+  const { total } = readExerciseCounts();
+  totalCountValue.textContent = total;
+  totalCountHint.classList.toggle("text-red-600", total > EXERCISE_COUNT_TOTAL_MAX);
+  totalCountHint.classList.toggle("text-slate-600", total <= EXERCISE_COUNT_TOTAL_MAX);
+}
+
+exerciseCountInputs.forEach((input) => input.addEventListener("input", updateTotalCountHint));
+updateTotalCountHint();
+
+// =============================================================================
 // 1. GENERAZIONE SCHEDA
 // =============================================================================
 
@@ -63,18 +97,20 @@ generateForm.addEventListener("submit", async (e) => {
 
   const level = generateForm.querySelector('input[name="level"]:checked').value;
 
-  const exerciseCounts = {};
-  let total = 0;
-  for (const type of EXERCISE_TYPES) {
-    const input = generateForm.querySelector(`input[name="count_${type}"]`);
-    const count = Math.max(0, Math.min(10, parseInt(input.value, 10) || 0));
-    input.value = count; // normalizza eventuali valori fuori range digitati a mano
-    exerciseCounts[type] = count;
-    total += count;
-  }
+  // Normalizza eventuali valori fuori range digitati a mano prima di leggerli.
+  exerciseCountInputs.forEach((input) => {
+    input.value = Math.max(0, Math.min(EXERCISE_COUNT_MAX, parseInt(input.value, 10) || 0));
+  });
+  const { counts: exerciseCounts, total } = readExerciseCounts();
+  updateTotalCountHint();
 
   if (total === 0) {
     showError("Scegli almeno una domanda in una tipologia di esercizio.");
+    return;
+  }
+
+  if (total > EXERCISE_COUNT_TOTAL_MAX) {
+    showError(`Massimo ${EXERCISE_COUNT_TOTAL_MAX} domande in totale (hai selezionato ${total}). Riduci qualche tipologia.`);
     return;
   }
 

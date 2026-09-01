@@ -29,9 +29,7 @@
   border-radius: 0.5rem;
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
-}
-.ex-count-row:has(.ex-count-input[value="0"]) {
-  color: #94a3b8;
+  color: #1e293b;
 }
 .ex-count-input {
   width: 4rem;
